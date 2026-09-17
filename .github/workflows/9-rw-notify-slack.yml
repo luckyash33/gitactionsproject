@@ -1,0 +1,54 @@
+name: Reusable - Slack Notification
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        description: "Overall pipeline status: success | failure | cancelled"
+        required: true
+        type: string
+      pipeline-name:
+        description: "Display name of the pipeline"
+        required: false
+        type: string
+        default: "CI/CD Pipeline"
+      environment:
+        description: "Environment that was deployed (leave empty if no deploy ran)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      SLACK_WEBHOOK_URL:
+        required: true
+
+jobs:
+  notify:
+    name: Notify Slack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "${{ inputs.status == 'success' && ':white_check_mark:' || inputs.status == 'failure' && ':x:' || ':warning:' }} *${{ inputs.pipeline-name }}* — ${{ inputs.status }}${{ inputs.environment != '' && format(' ({0})', inputs.environment) || '' }}",
+              "attachments": [
+                {
+                  "color": "${{ inputs.status == 'success' && '#2eb886' || inputs.status == 'failure' && '#cc0000' || '#e8a400' }}",
+                  "fields": [
+                    { "title": "Repository",   "value": "${{ github.repository }}", "short": true },
+                    { "title": "Branch",        "value": "${{ github.ref_name }}",  "short": true },
+                    { "title": "Triggered by",  "value": "${{ github.actor }}",     "short": true },
+                    { "title": "Commit SHA",    "value": "${{ github.sha }}",       "short": true },
+                    {
+                      "title": "Run",
+                      "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>",
+                      "short": false
+                    }
+                  ]
+                }
+              ]
+            }
