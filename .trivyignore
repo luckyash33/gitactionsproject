@@ -1,0 +1,21 @@
+# .trivyignore
+# CVEs suppressed because no fixed version is available in the Debian 13.4 base image.
+# These are OS-level packages in python:3.12-slim, not application dependencies.
+# Review and remove each entry once Debian ships a patched version.
+
+# libcap2 — Privilege escalation via TOCTOU race in cap_set_file()
+# Not used directly by the Flask app. No fix available from Debian as of 2026-05-07.
+
+CVE-2026-4878
+
+# ncurses (libncursesw6, libtinfo6, ncurses-base, ncurses-bin)
+# Buffer overflow in ncurses. Not used by the app at runtime.
+# No fix available from Debian as of 2026-05-07.
+
+CVE-2025-69720
+
+# systemd (libsystemd0, libudev1)
+# Arbitrary code execution via spurious IPC in systemd.
+# App does not use systemd or udev. No fix available from Debian as of 2026-05-07.
+
+CVE-2026-29111
