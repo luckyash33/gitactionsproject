@@ -1,0 +1,52 @@
+name: Reusable - Image Vulnerability Scan (ECR)
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        description: "AWS region where ECR is hosted"
+        required: false
+        type: string
+        default: "ap-south-1"
+      severity:
+        description: "Trivy severity levels to check (e.g. CRITICAL,HIGH)"
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+      exit-code:
+        description: "Exit code when vulnerabilities found (0=warn only, 1=fail pipeline)"
+        required: false
+        type: string
+        default: "1"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  trivy-scan:
+    name: Trivy image scan (ECR)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws-region }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: "${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPO_NAME }}:latest"
+          format: "table"
+          exit-code: ${{ inputs.exit-code }}
+          severity: ${{ inputs.severity }}
+          trivyignores: ${{ github.workspace }}/.trivyignore
