@@ -1,0 +1,69 @@
+name: Reusable - Unit & Integration Tests
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version to use"
+        required: false
+        type: string
+        default: "3.12"
+    outputs:
+      coverage-pct:
+        description: "Line coverage percentage reported by pytest-cov"
+        value: ${{ jobs.pytest.outputs.coverage-pct }}
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ inputs.python-version }})
+    runs-on: ubuntu-latest
+
+    outputs:
+      coverage-pct: ${{ steps.coverage.outputs.pct }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=. --cov-report=xml --cov-report=term-missing
+          EXIT=$?
+          if [ $EXIT -eq 5 ]; then
+            echo "::error::No test files found. Add test_*.py files to the repository."
+            exit 1
+          fi
+          exit $EXIT
+
+      - name: Extract coverage percentage
+        id: coverage
+        if: always()
+        run: |
+          if [ ! -f coverage.xml ]; then
+            echo "pct=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          PCT=$(python -c "
+          import xml.etree.ElementTree as ET
+          root = ET.parse('coverage.xml').getroot()
+          print(round(float(root.attrib.get('line-rate', 0)) * 100, 1))
+          ")
+          echo "pct=$PCT" >> $GITHUB_OUTPUT
+          echo "Coverage: $PCT%"
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
