@@ -1,0 +1,71 @@
+name: Reusable - Docker Build and Push to ECR
+
+on:
+  workflow_call:
+    inputs:
+      aws-region:
+        description: "AWS region where ECR is hosted"
+        required: false
+        type: string
+        default: "ap-south-1"
+    outputs:
+      image-uri:
+        description: "Full ECR image URI that was pushed (ACCOUNT.dkr.ecr.REGION.amazonaws.com/REPO:SHA)"
+        value: ${{ jobs.docker-build-push.outputs.image-uri }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  dockerfile-lint:
+    name: Lint Dockerfile (hadolint)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+  docker-build-push:
+    name: Build and push to ECR
+    runs-on: ubuntu-latest
+    needs: dockerfile-lint
+
+    outputs:
+      image-uri: ${{ steps.build-push.outputs.image-uri }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws-region }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag and push to ECR
+        id: build-push
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPO_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          docker build -t "$IMAGE_URI" .
+          docker tag  "$IMAGE_URI" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          docker push "$IMAGE_URI"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+          echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
