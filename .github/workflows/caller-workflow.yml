@@ -1,0 +1,175 @@
+name: Enterprise CI/CD Pipeline
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+# Push to main  → full pipeline including staging deploy
+# PR to main    → S1 through S4 only (no deploy — acts as a pre-merge gate)
+# Manual        → full pipeline; set skip-deploy=true to stop before staging
+#
+# Production deployment is intentionally decoupled from this pipeline.
+# Use 00-caller-prod-deploy.yml after a minimum 3-week staging observation.
+on:
+#  push:
+#    branches: [main]
+#  pull_request:
+#    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip-deploy:
+        description: "Skip staging deployment (S5 onwards)"
+        required: false
+        type: boolean
+        default: false
+
+# ── Permissions ────────────────────────────────────────────────────────────────
+# id-token: write  → OIDC authentication for all AWS interactions
+# contents: read   → code checkout
+# pull-requests: read → PR context for quality gates
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+
+jobs:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 1 — Security & Quality Gates  (run in parallel)
+  #
+  #   secret-scan   → gitleaks: detect hardcoded secrets/credentials
+  #   code-quality  → flake8 (lint) + bandit (SAST) + pip-audit (CVE scan)
+  #   sonar-scan    → SonarCloud: coverage, bugs, code smells, duplications
+  #
+  # All three must pass before anything downstream runs.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  secret-scan:
+    name: "[S1] Secret Scan"
+    uses: ./.github/workflows/01-rw-secret-scan.yml
+    secrets: inherit
+
+  code-quality:
+    name: "[S1] Code Quality"
+    uses: ./.github/workflows/02-rw-code-quality.yml
+    with:
+      python-version: "3.12"
+    secrets: inherit
+
+  sonar-scan:
+    name: "[S1] SonarCloud"
+    uses: ./.github/workflows/03-rw-sonar-scan.yml
+    with:
+      python-version: "3.12"
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 2 — Unit & Integration Tests
+  #
+  #   Hard test gate: pipeline fails here if any test fails.
+  #   (Unlike sonar-scan which uses || true, this stage enforces test passage.)
+  #   Coverage report is uploaded as a workflow artifact.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  unit-tests:
+    name: "[S2] Unit & Integration Tests"
+    needs: [secret-scan, code-quality, sonar-scan]
+    uses: ./.github/workflows/07-rw-unit-tests.yml
+    with:
+      python-version: "3.12"
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 3 — Build & Publish Artifact
+  #
+  #   hadolint → lint Dockerfile
+  #   docker build → tag with :sha and :latest → push to Amazon ECR
+  # ════════════════════════════════════════════════════════════════════════════
+
+  docker-build:
+    name: "[S3] Docker Build & Push → ECR"
+    needs: unit-tests
+    uses: ./.github/workflows/04-rw-docker-build-push.yml
+    with:
+      aws-region: ap-south-1
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 4 — Container Image Security Scan
+  #
+  #   Trivy scans the image that was just pushed to ECR.
+  #   Fails the pipeline on any CRITICAL or HIGH CVE.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  image-scan:
+    name: "[S4] Image Vulnerability Scan"
+    needs: docker-build
+    uses: ./.github/workflows/05-rw-image-scan.yml
+    with:
+      aws-region: ap-south-1
+      severity: "CRITICAL,HIGH"
+      exit-code: "1"
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 5 — Deploy to Staging
+  #
+  # Skipped on PRs and when skip-deploy=true.
+  # Uses GitHub Environment "staging" — configure environment-specific
+  # secrets and deployment branch rules in repo Settings → Environments.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  deploy-staging:
+    name: "[S5] Deploy to ECS"
+    needs: image-scan
+    if: >
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      inputs.skip-deploy != true
+    uses: ./.github/workflows/06-rw-deploy-ecs.yml
+    with:
+      environment: staging
+      aws-region: ap-south-1
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 6 — Smoke Test
+  #
+  # Queries ECS via AWS CLI to confirm the service is ACTIVE,
+  # runningCount == desiredCount, and the latest deployment is COMPLETED.
+  # No load balancer required.
+  # ════════════════════════════════════════════════════════════════════════════
+
+  smoke-test:
+    name: "[S6] Smoke Test"
+    needs: deploy-staging
+    if: >
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      inputs.skip-deploy != true
+    uses: ./.github/workflows/08-rw-smoke-test.yml
+    with:
+      aws-region: ap-south-1
+      retries: 5
+      retry-delay-seconds: 15
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STAGE 7 — Slack Notification
+  #
+  # Always runs regardless of pipeline outcome (if: always()).
+  # Determines overall status from all upstream job results:
+  #   - any failure  → failure (red)
+  #   - any cancel   → cancelled (yellow)
+  #   - all pass     → success (green)
+  #
+  # Requires: SLACK_WEBHOOK_URL secret set in repo Settings → Secrets
+  # ════════════════════════════════════════════════════════════════════════════
+
+  notify-slack:
+    name: "[S7] Notify Slack"
+    needs: [secret-scan, code-quality, sonar-scan, unit-tests, docker-build, image-scan, deploy-staging, smoke-test]
+    if: always()
+    uses: ./.github/workflows/09-rw-notify-slack.yml
+    with:
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || 'success' }}
+      pipeline-name: "Enterprise CI/CD Pipeline"
+      environment: "staging"
+    secrets: inherit
