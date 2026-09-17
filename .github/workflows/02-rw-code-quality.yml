@@ -1,0 +1,54 @@
+name: Reusable - Code Quality
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version to use"
+        required: false
+        type: string
+        default: "3.12"
+
+jobs:
+  lint-and-sast:
+    name: Lint & SAST (flake8 + bandit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies and tools
+        run: |
+          pip install -r requirements.txt
+          pip install flake8 bandit
+
+      - name: Lint - flake8
+        run: flake8 app.py
+
+      - name: SAST scan - bandit
+        run: bandit -r app.py
+
+  dependency-scan:
+    name: Dependency CVE scan (pip-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies for known CVEs
+        run: pip-audit -r requirements.txt
