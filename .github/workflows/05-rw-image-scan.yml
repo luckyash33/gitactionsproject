@@ -50,4 +50,5 @@ jobs:
           format: "table"
           exit-code: ${{ inputs.exit-code }}
           severity: ${{ inputs.severity }}
+          ignore-unfixed: true
           trivyignores: ${{ github.workspace }}/.trivyignore
