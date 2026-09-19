@@ -1,4 +1,4 @@
-name: Enterprise CI/CD Pipeline
+name: Enterprise CI/CD Pipeline1
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 # Push to main  → full pipeline including staging deploy
