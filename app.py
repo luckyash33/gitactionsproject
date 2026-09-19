@@ -22,10 +22,10 @@ def uptime():
 @app.route("/")
 def home():
     return jsonify({
-        "app": "Aviz Academy - GitHub Actions Demo",
-        "batch": "Batch 7 GHA Topic - DevSecOps",
+        "app": "Ashok - GitHub Actions Practice",
+        "batch": "Learning Topic - DevSecOps",
         "message": "Learn by Doing, Not Just Watching!",
-        "website": "avizacademy.com",
+        "website": "ashi33.com",
         "status": "running"
     })
 
