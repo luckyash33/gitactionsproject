@@ -2,7 +2,7 @@
 # Multi-stage build is overkill for a simple app, so keeping it clean and simple
 # Using slim variant = smaller image = smaller attack surface (fewer CVEs)
 
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # Metadata labels — good practice, helps identify images in Docker Hub
 LABEL maintainer="ashok.com"
